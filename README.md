@@ -1,4 +1,4 @@
 # silly-bot
 
 ## install
-In a clean python env, install `python=3.11` and `mediapipe==0.10.21`.
+Set up a clean python env with python 3.11, then `pip install -r requirements.txt`.
