@@ -17,7 +17,7 @@ Run from the silly-bot directory:
 
 import time
 import tkinter as tk
-from tkinter import font as tkfont
+from tkinter import font as tkfont, ttk
 
 import cv2
 import numpy as np
@@ -31,6 +31,7 @@ from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 from visualization import compute_joints, L_DEFAULT, visualize
+from servo_control import ServoController, list_available_ports, DEFAULT_PORT
 
 
 mp_holistic = mp.solutions.holistic
@@ -115,6 +116,15 @@ class WriteWrongDemo:
         self._cleanup_callbacks = []
         self._final_frame_image = None
 
+        # Optional Arduino link — the linkage IK in servo_control.py uses the
+        # same L as the on-screen visualization so the simulated linkage and
+        # the real one trace identical paths. The actual port is chosen on
+        # the intro screen; until then the controller is a silent no-op.
+        self.servo = ServoController(L=L_LINK, port=DEFAULT_PORT)
+        self._port_options = {}      # combobox label -> device path
+        self._port_status_label = None
+        self._auto_connect_done = False
+
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.show_intro()
 
@@ -198,7 +208,35 @@ class WriteWrongDemo:
             font=self.title_font, bg=self.BG, fg=self.FG,
             justify="center",
         )
-        title.pack(pady=(0, 36))
+        title.pack(pady=(0, 24))
+
+        port_block = tk.Frame(center, bg=self.BG)
+        port_block.pack(pady=(0, 24))
+
+        port_row = tk.Frame(port_block, bg=self.BG)
+        port_row.pack()
+
+        tk.Label(port_row, text="Servo port:", font=self.body_font,
+                 bg=self.BG, fg=self.FG).pack(side="left", padx=(0, 10))
+
+        self._port_var = tk.StringVar()
+        self._port_combo = ttk.Combobox(
+            port_row, textvariable=self._port_var,
+            state="readonly", width=42, font=self.body_font,
+        )
+        self._port_combo.pack(side="left", padx=(0, 10))
+        self._port_combo.bind("<<ComboboxSelected>>", self._on_port_selected)
+
+        self._make_button(port_row, "Refresh", self._refresh_ports,
+                          color=self.COLOR_NEUTRAL).pack(side="left")
+
+        self._port_status_label = tk.Label(
+            port_block, text="", font=self.body_font, bg=self.BG,
+            fg=self.COLOR_NEUTRAL,
+        )
+        self._port_status_label.pack(pady=(10, 0))
+
+        self._refresh_ports()
 
         btn_row = tk.Frame(center, bg=self.BG)
         btn_row.pack()
@@ -206,6 +244,96 @@ class WriteWrongDemo:
                           color=self.COLOR_ACCENT).pack(side="left", padx=8)
         self._make_button(btn_row, "Plot circle demo", self.run_circle_demo,
                           color=self.COLOR_PRIMARY).pack(side="left", padx=8)
+
+    NO_SERVO_LABEL = "(no servo)"
+
+    def _refresh_ports(self):
+        """Rescan available serial ports and repopulate the combobox."""
+        ports = list_available_ports()
+        self._port_options = {}
+        labels = [self.NO_SERVO_LABEL]
+        for device, desc in ports:
+            label = f"{device} — {desc}" if desc else device
+            self._port_options[label] = device
+            labels.append(label)
+        self._port_combo["values"] = labels
+
+        # Pick a sensible default selection in this priority:
+        #   1. whatever is currently connected
+        #   2. the controller's last-used / default port if visible
+        #   3. "(no servo)"
+        selected = self.NO_SERVO_LABEL
+        target = self.servo.port if self.servo.is_connected else self.servo.port
+        if target:
+            for label, device in self._port_options.items():
+                if device == target:
+                    selected = label
+                    break
+        self._port_var.set(selected)
+
+        # First time we see the intro, try to auto-connect to the default port
+        # if it's actually present, so users with the standard wiring don't
+        # have to click anything. Only run once so "Restart" doesn't reconnect.
+        if (not self._auto_connect_done
+                and not self.servo.is_connected
+                and selected != self.NO_SERVO_LABEL):
+            self._auto_connect_done = True
+            self._connect_to_selected()
+        else:
+            self._update_port_status()
+
+    def _on_port_selected(self, _event=None):
+        self._connect_to_selected()
+
+    def _connect_to_selected(self):
+        label = self._port_var.get()
+        if label == self.NO_SERVO_LABEL:
+            self.servo.close()
+            self._update_port_status("Servo: not connected (simulation only)",
+                                     color=self.COLOR_NEUTRAL)
+            return
+
+        device = self._port_options.get(label)
+        if device is None:
+            return
+        if self.servo.is_connected and self.servo.port == device:
+            self._update_port_status(f"Servo: connected ({device})",
+                                     color=self.COLOR_SUCCESS)
+            return
+
+        self.servo.close()
+        self.servo.port = device
+        self._update_port_status(f"Connecting to {device}…",
+                                 color=self.COLOR_NEUTRAL)
+        # Force the label to paint before the (blocking) 2-second open.
+        self.root.update_idletasks()
+
+        if self.servo.connect():
+            self._update_port_status(f"Servo: connected ({device})",
+                                     color=self.COLOR_SUCCESS)
+        else:
+            self._update_port_status(
+                f"Could not open {device} — check the cable and try Refresh.",
+                color=self.COLOR_ACCENT,
+            )
+
+    def _update_port_status(self, text=None, color=None):
+        if text is None:
+            if self.servo.is_connected:
+                text = f"Servo: connected ({self.servo.port})"
+                color = self.COLOR_SUCCESS
+            else:
+                text = "Servo: not connected (simulation only)"
+                color = self.COLOR_NEUTRAL
+        label = self._port_status_label
+        if label is None:
+            return
+        try:
+            if label.winfo_exists():
+                label.config(text=text, fg=color or self.COLOR_NEUTRAL)
+        except tk.TclError:
+            # Widget was destroyed (user navigated to another screen).
+            self._port_status_label = None
 
     def run_circle_demo(self):
         xs, ys = circle_demo_trajectory(L_DEFAULT)
@@ -384,6 +512,15 @@ class WriteWrongDemo:
                          font=self.title_font, bg=self.BG, fg=self.FG)
         title.pack(pady=(20, 8))
 
+        if self.servo.is_connected:
+            status_text = f"Servo: connected ({self.servo.port})"
+            status_color = self.COLOR_SUCCESS
+        else:
+            status_text = "Servo: not connected (simulation only)"
+            status_color = self.COLOR_NEUTRAL
+        tk.Label(frame, text=status_text, font=self.body_font,
+                 bg=self.BG, fg=status_color).pack(pady=(0, 8))
+
         plot_frame = tk.Frame(frame, bg=self.BG)
         plot_frame.pack(fill="both", expand=True, padx=40, pady=10)
 
@@ -500,6 +637,10 @@ class WriteWrongDemo:
             rod_R.set_data([P4[0], P5[0]], [P4[1], P5[1]])
             ee.set_data([P5[0]], [P5[1]])
             trail.set_data(traj_x[: i + 1], traj_y[: i + 1])
+            # Drive the real linkage in lockstep with the on-screen one. The
+            # frames list only contains reachable poses, so the IK in
+            # send_xy is guaranteed to succeed for these (x, y).
+            self.servo.send_xy(float(P5[0]), float(P5[1]))
             if i == len(frames) - 1 and not done_flag["done"]:
                 done_flag["done"] = True
                 if on_complete is not None:
@@ -567,6 +708,10 @@ class WriteWrongDemo:
                 cb()
             except Exception:
                 pass
+        try:
+            self.servo.close()
+        except Exception:
+            pass
         self.root.destroy()
 
 

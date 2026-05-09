@@ -10,7 +10,7 @@ for port, desc, hwid in sorted(ports):
     print(f"- {port}: {desc}")
 
 # Set up the serial connection (Change 'COM3' to your actual port)
-arduino_port = '/dev/cu.usbmodem31301' 
+arduino_port = '/dev/cu.usbmodem1101' #'/dev/cu.usbmodem31301'
 baud_rate = 9600
 
 print(f"Connecting to {arduino_port}...")
