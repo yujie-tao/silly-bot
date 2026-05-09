@@ -22,12 +22,15 @@ except serial.SerialException as e:
 def send_angles(angle1, angle2):
     """Formats the angles as 'angle1,angle2\n' and sends them."""
     # Ensure angles are within safe servo limits (0 to 180)
+    angle1 = angle1 + 90
+    angle2 = angle2 + 90
     angle1 = max(0, min(180, int(angle1)))
     angle2 = max(0, min(180, int(angle2)))
     
+    
     command = f"{angle1},{angle2}\n"
-    ser.write(command.encode('utf-8'))
-    # print(f"Sent: {command.strip()}") # Uncomment to debug sent values
+    # ser.write(command.encode('utf-8'))
+    print(f"Sent: {command.strip()}") # Uncomment to debug sent values
 
 # --- Camera & Math Setup ---
 mp_drawing = mp.solutions.drawing_utils
@@ -93,9 +96,9 @@ def solve_theta_from_xy(X, Y, L, b=None, c=None):
     err = max(abs(np.hypot(X - P3[0], Y - P3[1]) - b),
               abs(np.hypot(X - P4[0], Y - P4[1]) - c))
 
-    best = {
-        "theta1": float(theta1),
-        "theta2": float(theta2),
+    return {
+        "theta1": np.degrees(float(theta1)),
+        "theta2": np.degrees(float(theta2)),
         "error": float(err),
         "success": True,
     }
@@ -130,6 +133,8 @@ def main():
                     
                     # --- NEW: Pass the results to the Arduino ---
                     if theta_result and theta_result["success"]:
+                        print(theta_result["theta1"], theta_result["theta2"])
+                        
                         # theta_result is a dictionary, so we access it by key rather than index
                         send_angles(theta_result["theta1"], theta_result["theta2"])
 
