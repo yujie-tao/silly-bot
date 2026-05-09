@@ -38,7 +38,7 @@ def _circle_intersect(c1, r1, c2, r2):
     return (p0, p1) if p0[1] <= p1[1] else (p1, p0)
 
 
-def compute_joints(x, y, L, prev=None):
+def compute_joints(x, y, L):
     """
     Forward geometry: given end-effector position (x, y) return the five joint
     positions (P1, P2, P3, P4, P5) or None if the position is unreachable.
@@ -67,26 +67,17 @@ def compute_joints(x, y, L, prev=None):
     if pts4 is None:
         return None
 
-    best, best_cost = None, np.inf
-    for P3c in pts3:
-        for P4c in pts4:
-            if _segments_cross(P1, P3c, P2, P4c):
-                continue
-            if prev is not None:
-                # Continuity: minimise total elbow displacement from last frame
-                cost = (np.linalg.norm(P3c - prev[2]) +
-                        np.linalg.norm(P4c - prev[3]))
-            else:
-                # First frame: prefer highest elbows (smallest y sum)
-                cost = P3c[1] + P4c[1]
-            if cost < best_cost:
-                best_cost = cost
-                best = (P3c, P4c)
+    # Left arm always points left  → pick the intersection with the smaller x.
+    # Right arm always points right → pick the intersection with the larger x.
+    # This is the only physically valid branch for a downward-hanging 5-bar
+    # linkage, and it is continuous throughout the reachable workspace because
+    # the two circle-intersection points never swap their x-ordering.
+    P3 = pts3[0] if pts3[0][0] <= pts3[1][0] else pts3[1]
+    P4 = pts4[0] if pts4[0][0] >= pts4[1][0] else pts4[1]
 
-    if best is None:
+    if _segments_cross(P1, P3, P2, P4):
         return None
 
-    P3, P4 = best
     return P1, P2, P3, P4, P5
 
 
@@ -113,12 +104,10 @@ def visualize(xs, ys, L=L_DEFAULT, interval=80, title="5-Bar Linkage"):
 
     print("Computing joint positions...")
     frames = []
-    prev = None
     for x, y in zip(xs, ys):
-        j = compute_joints(x, y, L, prev=prev)
+        j = compute_joints(x, y, L)
         if j is not None:
             frames.append(j)
-            prev = j
         else:
             print(f"  ({x:.3f}, {y:.3f}) unreachable — skipped")
 
