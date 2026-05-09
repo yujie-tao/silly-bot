@@ -1,0 +1,7 @@
+python=3.11
+mediapipe==0.10.21
+opencv-python
+numpy
+scipy
+matplotlib
+pyserial
