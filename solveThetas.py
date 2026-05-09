@@ -54,7 +54,7 @@ import numpy as np
 from scipy.optimize import least_squares
 import serial
 
-PORT_TEENSY, BAUD_TEENSY = "COM5", 115200
+PORT_TEENSY, BAUD_TEENSY = "COM5", 9600
 SERIAL_TIMEOUT = 1
 
 
@@ -156,17 +156,19 @@ L = 5.0
 b = L
 c = L
 
-sol = solve_theta_from_xy(X, Y, L, b, c)
+# sol = solve_theta_from_xy(X, Y, L, b, c)
 
-print("theta1 =", sol["theta1"])
-print("theta2 =", sol["theta2"])
-print("error  =", sol["error"])
+# print("theta1 =", sol["theta1"])
+# print("theta2 =", sol["theta2"])
+# print("error  =", sol["error"])
 
 
 if __name__ == "__main__":
-    if sol is None:
-        raise RuntimeError("No theta solution found")
-
-    with open_serial_port() as ser:
-        send_thetas(ser, sol["theta1"], sol["theta2"])
-        print("sent theta1/theta2 to Arduino")
+    # if sol is None:
+    #     raise RuntimeError("No theta solution found")
+    
+    while(True):
+        sol = solve_theta_from_xy(X, Y, L, b, c)
+        with open_serial_port() as ser:
+            send_thetas(ser, sol["theta1"], sol["theta2"])
+            print("sent theta1/theta2 to Arduino")
