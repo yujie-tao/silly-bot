@@ -51,7 +51,6 @@
 
 
 import numpy as np
-from scipy.optimize import least_squares
 import serial
 
 PORT_TEENSY, BAUD_TEENSY = "COM5", 9600
@@ -70,84 +69,65 @@ def send_thetas(ser, theta1, theta2):
     ser.flush()
 
 
-def solve_theta_from_xy(X, Y, L, b, c, n_starts=25):
+def solve_theta_from_xy(X, Y, L, b=None, c=None):
     """
-    Solve for theta1, theta2 from X, Y using the equations:
+    Closed-form inverse kinematics for the 5-bar linkage.
 
-        P = (-L sin(theta1) + L cos(B),
-              L cos(theta1) + L sin(B))
+    Geometry (matches visualization.py, +y down):
+        P1 = (0, 0)            left motor anchor
+        P2 = (L, 0)            right motor anchor
+        P5 = (X, Y)            end effector
+        |P1-P3| = |P3-P5| = L  left arm + left rod
+        |P2-P4| = |P4-P5| = L  right arm + right rod
 
-        P = ( L sin(theta2) - L sin(C),
-              L cos(theta2) + L sin(C))
+    theta1 is measured at P1 from +y toward -x (left arm swings outward).
+    theta2 is measured at P2 from +y toward +x (right arm swings outward).
 
-    with principal/smallest B and C from acos, so sin(B), sin(C) >= 0.
+    Each arm is an independent 2-link IK problem, solved with the law of
+    cosines. The branch choices below force the elbows outward (left arm
+    points left, right arm points right) to match compute_joints().
+
+    Returns dict with theta1, theta2, error, success — or success=False
+    if (X, Y) is unreachable.
     """
-    
-    def residual(theta):
-        theta1, theta2 = theta
+    b = L if b is None else b
+    c = L if c is None else c
 
-        # Distance a
-        a = L * np.sqrt(
-            (np.sin(theta1) - np.sin(theta2))**2
-            + (np.cos(theta1) - np.cos(theta2))**2
-        )
+    fail = {"theta1": np.nan, "theta2": np.nan,
+            "error": np.inf, "success": False}
 
-        # Avoid division by zero
-        if a < 1e-12:
-            return np.array([1e6, 1e6, 1e6, 1e6])
+    # Left arm: triangle P1-P3-P5 with sides L (arm), b (rod), d1 (base)
+    d1 = np.hypot(X, Y)
+    if d1 < 1e-12 or d1 > L + b or d1 < abs(L - b):
+        return fail
+    cos_a1 = (L * L + d1 * d1 - b * b) / (2 * L * d1)
+    alpha1 = np.arccos(np.clip(cos_a1, -1.0, 1.0))
+    phi1 = np.arctan2(Y, X)
+    P3 = L * np.array([np.cos(phi1 + alpha1), np.sin(phi1 + alpha1)])
+    theta1 = np.arctan2(-P3[0], P3[1])
 
-        cosB = (a**2 + c**2 - b**2) / (2 * a * c)
-        cosC = (a**2 + b**2 - c**2) / (2 * a * b)
+    # Right arm: triangle P2-P4-P5 with sides L (arm), c (rod), d2 (base)
+    d2 = np.hypot(X - L, Y)
+    if d2 < 1e-12 or d2 > L + c or d2 < abs(L - c):
+        return fail
+    cos_a2 = (L * L + d2 * d2 - c * c) / (2 * L * d2)
+    alpha2 = np.arccos(np.clip(cos_a2, -1.0, 1.0))
+    phi2 = np.arctan2(Y, X - L)
+    P4 = np.array([L, 0.0]) + L * np.array(
+        [np.cos(phi2 - alpha2), np.sin(phi2 - alpha2)]
+    )
+    theta2 = np.arctan2(P4[0] - L, P4[1])
 
-        # Invalid triangle geometry
-        if abs(cosB) > 1 or abs(cosC) > 1:
-            return np.array([1e6, 1e6, 1e6, 1e6])
+    # Closure check: rods from P3, P4 to (X, Y) must have lengths b, c.
+    err = max(abs(np.hypot(X - P3[0], Y - P3[1]) - b),
+              abs(np.hypot(X - P4[0], Y - P4[1]) - c))
 
-        # Principal smallest angles: B,C in [0, pi]
-        sinB = np.sqrt(1 - cosB**2)
-        sinC = np.sqrt(1 - cosC**2)
-
-        X1 = -L * np.sin(theta1) + L * cosB
-        Y1 =  L * np.cos(theta1) + L * sinB
-
-        X2 =  L * np.sin(theta2) - L * sinC
-        Y2 =  L * np.cos(theta2) + L * sinC
-
-        return np.array([
-            X1 - X,
-            Y1 - Y,
-            X2 - X,
-            Y2 - Y
-        ])
-
-    best = None
-
-    # Multistart search over possible theta1/theta2 values
-    guesses = np.linspace(-np.pi, np.pi, n_starts)
-
-    for g1 in guesses:
-        for g2 in guesses:
-            sol = least_squares(
-                residual,
-                x0=np.array([g1, g2]),
-                bounds=([-np.pi, -np.pi], [np.pi, np.pi]),
-                xtol=1e-12,
-                ftol=1e-12,
-                gtol=1e-12,
-                max_nfev=5000
-            )
-
-            err = np.linalg.norm(residual(sol.x))
-
-            if best is None or err < best["error"]:
-                best = {
-                    "theta1": sol.x[0],
-                    "theta2": sol.x[1],
-                    "error": err,
-                    "success": sol.success
-                }
-
-    return best
+    return {
+        "theta1": float(theta1),
+        "theta2": float(theta2),
+        "error": float(err),
+        "success": True,
+    }
 
 
 X = 1.0
@@ -156,19 +136,12 @@ L = 5.0
 b = L
 c = L
 
-# sol = solve_theta_from_xy(X, Y, L, b, c)
-
-# print("theta1 =", sol["theta1"])
-# print("theta2 =", sol["theta2"])
-# print("error  =", sol["error"])
-
 
 if __name__ == "__main__":
-    # if sol is None:
-    #     raise RuntimeError("No theta solution found")
-    
-    while(True):
+    while True:
         sol = solve_theta_from_xy(X, Y, L, b, c)
+        if not sol["success"]:
+            raise RuntimeError(f"({X}, {Y}) is unreachable for L={L}")
         with open_serial_port() as ser:
             send_thetas(ser, sol["theta1"], sol["theta2"])
             print("sent theta1/theta2 to Arduino")
