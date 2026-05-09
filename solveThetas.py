@@ -54,7 +54,7 @@ import numpy as np
 from scipy.optimize import least_squares
 import serial
 
-PORT_TEENSY, BAUD_TEENSY = "COM3", 115200
+PORT_TEENSY, BAUD_TEENSY = "COM5", 115200
 SERIAL_TIMEOUT = 1
 
 
