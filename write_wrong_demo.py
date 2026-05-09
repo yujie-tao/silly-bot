@@ -1,7 +1,7 @@
 """
 WriteWrongDemo — a five-screen Tkinter app:
 
-    1. Introduction — "Put on the red clown nose..." + Start
+    1. Introduction — clown-nose prompt; Start recording / Plot circle demo
     2. Camera       — webcam preview with red-dot nose tracking,
                       3-2-1 countdown, then 10-second nose recording
     3. Complete     — XY plot of the recorded nose trajectory + Next/Retake
@@ -30,7 +30,7 @@ import matplotlib.animation as animation
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
-from visualization import compute_joints, L_DEFAULT
+from visualization import compute_joints, L_DEFAULT, visualize
 
 
 mp_holistic = mp.solutions.holistic
@@ -42,6 +42,16 @@ RECORD_SECONDS = 10
 L_LINK = L_DEFAULT
 WS_CENTER = (L_LINK / 2.0, L_LINK * 1.4)
 WS_RADIUS = L_LINK * 0.36
+
+
+def circle_demo_trajectory(L=L_DEFAULT):
+    """Same circular path as ``visualization.py`` __main__ demo."""
+    t = np.linspace(0, 2 * np.pi, 90, endpoint=False)
+    cx, cy = L / 2, L * 1.4
+    r = 1.8
+    xs = cx + r * np.cos(t)
+    ys = cy + r * np.sin(t)
+    return xs, ys
 
 
 def get_nose_position(face_landmarks):
@@ -85,6 +95,7 @@ class WriteWrongDemo:
     COLOR_ACCENT = "#d62728"
     COLOR_SUCCESS = "#2ca02c"
     COLOR_NEUTRAL = "#888888"
+    BUTTON_FG = "#333333"
 
     def __init__(self, root):
         self.root = root
@@ -114,8 +125,8 @@ class WriteWrongDemo:
         return tk.Button(
             parent, text=text, command=command,
             font=self.button_font,
-            bg=color, fg="white",
-            activebackground=color, activeforeground="white",
+            bg=color, fg=self.BUTTON_FG,
+            activebackground=color, activeforeground=self.BUTTON_FG,
             relief="flat", bd=0,
             padx=28, pady=12, cursor="hand2",
             highlightthickness=0,
@@ -189,8 +200,21 @@ class WriteWrongDemo:
         )
         title.pack(pady=(0, 36))
 
-        self._make_button(center, "Start", self.show_camera,
-                          color=self.COLOR_ACCENT).pack()
+        btn_row = tk.Frame(center, bg=self.BG)
+        btn_row.pack()
+        self._make_button(btn_row, "Start recording", self.show_camera,
+                          color=self.COLOR_ACCENT).pack(side="left", padx=8)
+        self._make_button(btn_row, "Plot circle demo", self.run_circle_demo,
+                          color=self.COLOR_PRIMARY).pack(side="left", padx=8)
+
+    def run_circle_demo(self):
+        xs, ys = circle_demo_trajectory(L_DEFAULT)
+        visualize(
+            xs, ys,
+            L=L_DEFAULT,
+            interval=60,
+            title="5-Bar Linkage — Circle Demo",
+        )
 
     # -------------------------- Screen 2: Camera ---------------------------
 
