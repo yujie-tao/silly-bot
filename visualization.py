@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
+from solveThetas import solve_theta_from_xy
 
 # Default link length — all five bars equal length in this design
 L_DEFAULT = 5.0
@@ -81,11 +82,24 @@ def compute_joints(x, y, L):
     return P1, P2, P3, P4, P5
 
 
-def _motor_angles(P1, P2, P3, P4, L):
-    """Return (theta1_deg, theta2_deg) measured from +y toward the link."""
-    theta1 = np.degrees(np.arctan2(-P3[0] + P1[0], P3[1] - P1[1]))
-    theta2 = np.degrees(np.arctan2(P4[0] - P2[0], P4[1] - P2[1]))
-    return theta1, theta2
+def compute_joints_from_solver(x, y, L):
+    """Run IK solver → θ1, θ2, then forward kinematics → joint positions."""
+    sol = solve_theta_from_xy(x, y, L, b=L, c=L)
+    print(x, y, 180 - (np.degrees(sol["theta1"])+90.0), np.degrees(sol["theta2"])+90.0)
+    if sol is None or sol["error"] > 0.5:
+        return None
+    t1, t2 = sol["theta1"], sol["theta2"]
+    P1 = np.array([0.0, 0.0])
+    P2 = np.array([L, 0.0])
+    P3 = np.array([-L * np.sin(t1), L * np.cos(t1)])
+    P4 = np.array([L + L * np.sin(t2), L * np.cos(t2)])
+    pts5 = _circle_intersect(P3, L, P4, L)
+    if pts5 is None:
+        P5 = np.array([x, y])
+    else:
+        target = np.array([x, y])
+        P5 = min(pts5, key=lambda p: np.linalg.norm(p - target))
+    return P1, P2, P3, P4, P5, t1, t2, sol["error"]
 
 
 def visualize(xs, ys, L=L_DEFAULT, interval=80, title="5-Bar Linkage"):
@@ -101,11 +115,13 @@ def visualize(xs, ys, L=L_DEFAULT, interval=80, title="5-Bar Linkage"):
     """
     xs = np.asarray(xs, dtype=float)
     ys = np.asarray(ys, dtype=float)
+    theta1Max = 0.0
+    theta2Max = 0.0
 
-    print("Computing joint positions...")
+    print("Computing joint positions (running IK solver — may be slow)...")
     frames = []
     for x, y in zip(xs, ys):
-        j = compute_joints(x, y, L)
+        j = compute_joints_from_solver(x, y, L)
         if j is not None:
             frames.append(j)
         else:
@@ -123,7 +139,7 @@ def visualize(xs, ys, L=L_DEFAULT, interval=80, title="5-Bar Linkage"):
     ax.set_ylabel("Y  (m, positive ↓)")
     ax.grid(True, alpha=0.25, linestyle="--")
 
-    all_pts = np.vstack([np.vstack(f) for f in frames])
+    all_pts = np.vstack([np.vstack(f[:5]) for f in frames])
     pad = L * 0.45
     xmin, xmax = all_pts[:, 0].min() - pad, all_pts[:, 0].max() + pad
     ymin, ymax = all_pts[:, 1].min() - pad, all_pts[:, 1].max() + pad
@@ -183,7 +199,7 @@ def visualize(xs, ys, L=L_DEFAULT, interval=80, title="5-Bar Linkage"):
         return arm_L, arm_R, rod_L, rod_R, ee_dot, trail, info
 
     def update(i):
-        P1, P2, P3, P4, P5 = frames[i]
+        P1, P2, P3, P4, P5, t1, t2, err = frames[i]
 
         arm_L.set_data([P1[0], P3[0]], [P1[1], P3[1]])
         arm_R.set_data([P2[0], P4[0]], [P2[1], P4[1]])
@@ -191,14 +207,23 @@ def visualize(xs, ys, L=L_DEFAULT, interval=80, title="5-Bar Linkage"):
         rod_R.set_data([P4[0], P5[0]], [P4[1], P5[1]])
         ee_dot.set_data([P5[0]], [P5[1]])
         trail.set_data(traj_x[: i + 1], traj_y[: i + 1])
-
-        t1, t2 = _motor_angles(P1, P2, P3, P4, L)
+        
+        
+        # if np.degrees(t1) > theta1Max:
+        #     theta1Max = np.degrees(t1)
+        #     print(P5[0], P5[1], theta1Max)
+            
+        # if np.degrees(t2) > theta2Max:
+        #     theta2Max = np.degrees(t2)
+        #     print(P5[0], P5[1], theta2Max)
+            
         info.set_text(
             f"Frame {i+1}/{len(frames)}\n"
-            f"θ₁ = {t1:+.1f}°\n"
-            f"θ₂ = {t2:+.1f}°\n"
+            f"θ₁ = {180 - (np.degrees(t1)+90.0):+.1f}°\n"
+            f"θ₂ = {np.degrees(t2)+90.0:+.1f}°\n"
             f"X  = {P5[0]:.3f}\n"
-            f"Y  = {P5[1]:.3f}"
+            f"Y  = {P5[1]:.3f}\n"
+            f"err= {err:.2e}"
         )
         return arm_L, arm_R, rod_L, rod_R, ee_dot, trail, info
 
@@ -217,10 +242,15 @@ def visualize(xs, ys, L=L_DEFAULT, interval=80, title="5-Bar Linkage"):
 if __name__ == "__main__":
     L = L_DEFAULT          # 5.0
 
-    # Circular trajectory centred in the reachable workspace
+    # ── custom trajectory — edit and uncomment to use ─────────────────────────
+    # xs = [2.0, 2.5, 3.0, 2.5, 2.0]
+    # ys = [6.0, 6.5, 7.0, 7.5, 8.0]
+    # visualize(xs, ys, L=L, interval=200, title="Custom Trajectory")
+
+    # ── circle demo ───────────────────────────────────────────────────────────
     t = np.linspace(0, 2 * np.pi, 90, endpoint=False)
-    cx, cy = L / 2, L * 1.4     # centre: (2.5, 7.0)
-    r = 1.8
+    cx, cy = L / 2, 7.5     # centre: (2.5, 7.0)
+    r = 0.5
     xs = cx + r * np.cos(t)
     ys = cy + r * np.sin(t)
 
