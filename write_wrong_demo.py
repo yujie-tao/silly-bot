@@ -335,6 +335,41 @@ class WriteWrongDemo:
             # Widget was destroyed (user navigated to another screen).
             self._port_status_label = None
 
+    def _reset_servos_to_neutral(self):
+        """
+        Park both servos at 90°, 90°. If a linkage animation is currently
+        playing we stop it first so the next 60ms tick doesn't immediately
+        overwrite the reset. The on-screen plot stays where it was; the
+        physical linkage is the thing being reset.
+        """
+        anim = getattr(self, "_anim", None)
+        if anim is not None:
+            try:
+                if anim.event_source is not None:
+                    anim.event_source.stop()
+            except Exception:
+                pass
+            self._anim = None
+
+        if not self.servo.is_connected:
+            msg = "No servo connected — nothing to reset."
+            color = self.COLOR_NEUTRAL
+        elif self.servo.reset_to_neutral():
+            msg = "Servos reset to 90°, 90°."
+            color = self.COLOR_SUCCESS
+        else:
+            msg = "Reset failed — see console for details."
+            color = self.COLOR_ACCENT
+
+        label = getattr(self, "_reset_status_label", None)
+        if label is None:
+            return
+        try:
+            if label.winfo_exists():
+                label.config(text=msg, fg=color)
+        except tk.TclError:
+            self._reset_status_label = None
+
     def run_circle_demo(self):
         xs, ys = circle_demo_trajectory(L_DEFAULT)
         visualize(
@@ -494,6 +529,17 @@ class WriteWrongDemo:
         canvas.draw()
         canvas.get_tk_widget().pack(fill="both", expand=True)
 
+        reset_row = tk.Frame(frame, bg=self.BG)
+        reset_row.pack(pady=(8, 0))
+        self._make_button(reset_row, "Reset servos (90°, 90°)",
+                          self._reset_servos_to_neutral,
+                          color=self.COLOR_NEUTRAL).pack()
+        self._reset_status_label = tk.Label(
+            frame, text="", font=self.body_font, bg=self.BG,
+            fg=self.COLOR_NEUTRAL,
+        )
+        self._reset_status_label.pack(pady=(4, 0))
+
         btn_frame = tk.Frame(frame, bg=self.BG)
         btn_frame.pack(pady=20)
         self._make_button(btn_frame, "Retake", self.show_camera,
@@ -519,7 +565,18 @@ class WriteWrongDemo:
             status_text = "Servo: not connected (simulation only)"
             status_color = self.COLOR_NEUTRAL
         tk.Label(frame, text=status_text, font=self.body_font,
-                 bg=self.BG, fg=status_color).pack(pady=(0, 8))
+                 bg=self.BG, fg=status_color).pack(pady=(0, 4))
+
+        reset_row = tk.Frame(frame, bg=self.BG)
+        reset_row.pack(pady=(0, 4))
+        self._make_button(reset_row, "Reset servos (90°, 90°)",
+                          self._reset_servos_to_neutral,
+                          color=self.COLOR_NEUTRAL).pack()
+        self._reset_status_label = tk.Label(
+            frame, text="", font=self.body_font, bg=self.BG,
+            fg=self.COLOR_NEUTRAL,
+        )
+        self._reset_status_label.pack(pady=(0, 8))
 
         plot_frame = tk.Frame(frame, bg=self.BG)
         plot_frame.pack(fill="both", expand=True, padx=40, pady=10)
